@@ -1,0 +1,77 @@
+version: '3.8'
+
+services:
+  db:
+    image: timescale/timescaledb:latest-pg15
+    container_name: halwall-db
+    environment:
+      POSTGRES_DB: halwall
+      POSTGRES_USER: halwall_user
+      POSTGRES_PASSWORD: halwall_password
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7.2
+    container_name: halwall-redis
+    ports:
+      - "6380:6379"
+    command: redis-server --maxmemory 8gb --maxmemory-policy allkeys-lru
+
+  pgbouncer:
+    image: edoburu/pgbouncer
+    container_name: halwall-pgbouncer
+    environment:
+      DATABASE_URL: postgres://halwall_user:halwall_password@db:5432/halwall
+      PGBOUNCER_MAX_CLIENT_CONN: 200
+      PGBOUNCER_DEFAULT_POOL_SIZE: 20
+    ports:
+      - "6432:6432"
+    depends_on:
+      - db
+
+  api:
+    build: .
+    container_name: halwall-api
+    command: uvicorn src.api.main:app --host 0.0.0.0 --port 8000 --reload
+    volumes:
+      - .:/app
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgres://halwall_user:halwall_password@pgbouncer:6432/halwall
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      - pgbouncer
+      - redis
+
+  worker:
+    build: .
+    container_name: halwall-worker
+    command: celery -A src.workers.tasks worker --loglevel=info
+    volumes:
+      - .:/app
+    environment:
+      - DATABASE_URL=postgres://halwall_user:halwall_password@pgbouncer:6432/halwall
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      - db
+      - redis
+
+  beat:
+    build: .
+    container_name: halwall-beat
+    command: celery -A src.workers.tasks beat --loglevel=info
+    volumes:
+      - .:/app
+    environment:
+      - DATABASE_URL=postgres://halwall_user:halwall_password@pgbouncer:6432/halwall
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      - db
+      - redis
+
+volumes:
+  postgres_data:
