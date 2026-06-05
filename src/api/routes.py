@@ -9,6 +9,8 @@ from src.api.schemas import (
     BulkTrustLookupRequest, HallucinationReportRequest, 
     HallucinationReportResponse, SnapshotResponse
 )
+from src.auth.dependencies import require_auth
+from src.auth.rate_limit import check_rate_limit
 from datetime import datetime
 
 router = APIRouter(prefix="/internal")
@@ -21,7 +23,11 @@ def get_trust_level(score: int) -> str:
     return "UNTRUSTED"
 
 @router.post("/trust/lookup", response_model=TrustLookupResponse)
-async def lookup_trust(req: TrustLookupRequest, db: AsyncSession = Depends(get_db)):
+async def lookup_trust(
+    req: TrustLookupRequest,
+    db: AsyncSession = Depends(get_db),
+    _rate_limit: None = Depends(check_rate_limit),
+):
     result = await db.execute(
         select(Package).where(Package.name == req.name, Package.registry == req.registry)
     )
@@ -40,7 +46,11 @@ async def lookup_trust(req: TrustLookupRequest, db: AsyncSession = Depends(get_d
     )
 
 @router.post("/trust/bulk", response_model=List[TrustLookupResponse])
-async def bulk_lookup_trust(req: BulkTrustLookupRequest, db: AsyncSession = Depends(get_db)):
+async def bulk_lookup_trust(
+    req: BulkTrustLookupRequest,
+    db: AsyncSession = Depends(get_db),
+    _rate_limit: None = Depends(check_rate_limit),
+):
     responses = []
     for pkg_req in req.packages:
         result = await db.execute(
@@ -59,7 +69,12 @@ async def bulk_lookup_trust(req: BulkTrustLookupRequest, db: AsyncSession = Depe
     return responses
 
 @router.post("/hallucination/report", response_model=HallucinationReportResponse)
-async def report_hallucination(req: HallucinationReportRequest, db: AsyncSession = Depends(get_db)):
+async def report_hallucination(
+    req: HallucinationReportRequest,
+    db: AsyncSession = Depends(get_db),
+    _auth=Depends(require_auth(scopes=["write"])),
+    _rate_limit: None = Depends(check_rate_limit),
+):
     # Check if already exists
     result = await db.execute(
         select(HallucinationCandidate).where(
@@ -86,7 +101,10 @@ async def report_hallucination(req: HallucinationReportRequest, db: AsyncSession
     return HallucinationReportResponse(id=str(candidate.id), status="reported")
 
 @router.get("/snapshot/latest", response_model=SnapshotResponse)
-async def get_latest_snapshot(db: AsyncSession = Depends(get_db)):
+async def get_latest_snapshot(
+    db: AsyncSession = Depends(get_db),
+    _rate_limit: None = Depends(check_rate_limit),
+):
     result = await db.execute(
         select(TrustSnapshot).order_by(TrustSnapshot.snapshot_version.desc())
     )

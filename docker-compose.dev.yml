@@ -1,0 +1,40 @@
+# Development overrides — use with:
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+version: '3.8'
+
+services:
+  db:
+    environment:
+      POSTGRES_PASSWORD: halwall_password
+
+  redis:
+    command: redis-server --maxmemory 512mb --maxmemory-policy allkeys-lru
+
+  api:
+    command: uvicorn src.api.main:app --host 0.0.0.0 --port 8000 --reload
+    volumes:
+      - .:/app
+    environment:
+      - DATABASE_URL=postgres://halwall_user:halwall_password@pgbouncer:6432/halwall
+      - REDIS_URL=redis://redis:6379/0
+      - ENVIRONMENT=development
+      - DB_ECHO=true
+      - DB_SSL_REQUIRED=false
+      - LOG_LEVEL=DEBUG
+      - SECRET_KEY=dev-secret-not-for-production
+
+  worker:
+    volumes:
+      - .:/app
+    environment:
+      - DATABASE_URL=postgres://halwall_user:halwall_password@pgbouncer:6432/halwall
+      - REDIS_URL=redis://redis:6379/0
+      - ENVIRONMENT=development
+
+  beat:
+    volumes:
+      - .:/app
+    environment:
+      - DATABASE_URL=postgres://halwall_user:halwall_password@pgbouncer:6432/halwall
+      - REDIS_URL=redis://redis:6379/0
+      - ENVIRONMENT=development

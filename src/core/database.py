@@ -1,19 +1,10 @@
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-from sqlalchemy.orm import sessionmaker, declarative_base
-from src.core.config import settings
+"""
+Database module — re-exports from db_gate for backward compatibility.
 
-# For async SQLAlchemy, we need to ensure the driver is asyncpg
-DATABASE_URL = settings.DATABASE_URL.replace("postgres://", "postgresql+asyncpg://")
+All new code should import from src.core.db_gate directly.
+This module exists so existing imports (models, alembic, etc.) continue to work.
+"""
+from src.core.db_gate import Base, get_db, get_read_db, db_gate
 
-engine = create_async_engine(DATABASE_URL, echo=True)
-AsyncSessionLocal = sessionmaker(
-    bind=engine,
-    class_=AsyncSession,
-    expire_on_commit=False,
-)
-
-Base = declarative_base()
-
-async def get_db():
-    async with AsyncSessionLocal() as session:
-        yield session
+# Re-export for alembic and models
+__all__ = ["Base", "get_db", "get_read_db", "db_gate"]

@@ -5,73 +5,111 @@ services:
     image: timescale/timescaledb:latest-pg15
     container_name: halwall-db
     environment:
-      POSTGRES_DB: halwall
-      POSTGRES_USER: halwall_user
-      POSTGRES_PASSWORD: halwall_password
+      POSTGRES_DB: ${POSTGRES_DB:-halwall}
+      POSTGRES_USER: ${POSTGRES_USER:-halwall_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-halwall_password}
     ports:
       - "5433:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-halwall_user} -d ${POSTGRES_DB:-halwall}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   redis:
     image: redis:7.2
     container_name: halwall-redis
     ports:
       - "6380:6379"
-    command: redis-server --maxmemory 8gb --maxmemory-policy allkeys-lru
+    command: redis-server --maxmemory 512mb --maxmemory-policy allkeys-lru --requirepass ${REDIS_PASSWORD:-}
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   pgbouncer:
     image: edoburu/pgbouncer
     container_name: halwall-pgbouncer
     environment:
-      DATABASE_URL: postgres://halwall_user:halwall_password@db:5432/halwall
+      DATABASE_URL: postgres://${POSTGRES_USER:-halwall_user}:${POSTGRES_PASSWORD:-halwall_password}@db:5432/${POSTGRES_DB:-halwall}
       PGBOUNCER_MAX_CLIENT_CONN: 200
       PGBOUNCER_DEFAULT_POOL_SIZE: 20
+      PGBOUNCER_POOL_MODE: transaction
     ports:
       - "6432:6432"
     depends_on:
-      - db
+      db:
+        condition: service_healthy
 
   api:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
     container_name: halwall-api
-    command: uvicorn src.api.main:app --host 0.0.0.0 --port 8000 --reload
-    volumes:
-      - .:/app
+    command: uvicorn src.api.main:app --host 0.0.0.0 --port 8000 --workers 4
     ports:
       - "8000:8000"
-    environment:
-      - DATABASE_URL=postgres://halwall_user:halwall_password@pgbouncer:6432/halwall
-      - REDIS_URL=redis://redis:6379/0
+    env_file:
+      - .env
     depends_on:
-      - pgbouncer
-      - redis
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      pgbouncer:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/internal/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512M
 
   worker:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
     container_name: halwall-worker
-    command: celery -A src.workers.tasks worker --loglevel=info
-    volumes:
-      - .:/app
-    environment:
-      - DATABASE_URL=postgres://halwall_user:halwall_password@pgbouncer:6432/halwall
-      - REDIS_URL=redis://redis:6379/0
+    command: celery -A src.workers.tasks worker --loglevel=info --concurrency=4
+    env_file:
+      - .env
     depends_on:
-      - db
-      - redis
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512M
 
   beat:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
     container_name: halwall-beat
     command: celery -A src.workers.tasks beat --loglevel=info
-    volumes:
-      - .:/app
-    environment:
-      - DATABASE_URL=postgres://halwall_user:halwall_password@pgbouncer:6432/halwall
-      - REDIS_URL=redis://redis:6379/0
+    env_file:
+      - .env
     depends_on:
-      - db
-      - redis
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 256M
 
 volumes:
   postgres_data:

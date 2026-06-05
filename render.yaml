@@ -1,0 +1,90 @@
+# Render Blueprint — deploy HalWall with one click
+# https://render.com/docs/blueprint-spec
+#
+# Free tier deploys the API + PostgreSQL + Redis.
+# The Celery worker is on a starter plan (optional — comment it out for free-only).
+#
+# Usage: Push to GitHub, go to https://dashboard.render.com/blueprints
+#        and connect your repo. Render auto-detects this file.
+
+services:
+  # --- API Server (Free) ---
+  - type: web
+    name: halwall-api
+    runtime: docker
+    plan: free
+    region: oregon
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /internal/health
+    preDeployCommand: "alembic upgrade head"
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: halwall-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          name: halwall-redis
+          type: keyvalue
+          property: connectionString
+      - key: ENVIRONMENT
+        value: production
+      - key: LOG_LEVEL
+        value: WARNING
+      - key: SECRET_KEY
+        generateValue: true
+      - key: DB_POOL_SIZE
+        value: "5"
+      - key: DB_MAX_OVERFLOW
+        value: "5"
+      - key: DB_STATEMENT_TIMEOUT_MS
+        value: "30000"
+      - key: DEFAULT_RATE_LIMIT
+        value: "30"
+      - key: CORS_ORIGINS
+        value: ""
+      - key: DB_SSL_REQUIRED
+        value: "true"
+
+  # --- Celery Worker (Starter — $7/mo) ---
+  # Comment out this entire block if you want free-only deployment.
+  # Without the worker, the API still works — you just won't get
+  # automatic background crawling of packages.
+  - type: worker
+    name: halwall-worker
+    runtime: docker
+    plan: starter
+    region: oregon
+    dockerfilePath: ./Dockerfile
+    dockerCommand: celery -A src.workers.tasks worker --loglevel=info --concurrency=2
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: halwall-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          name: halwall-redis
+          type: keyvalue
+          property: connectionString
+      - key: ENVIRONMENT
+        value: production
+      - key: SECRET_KEY
+        generateValue: true
+
+  # --- Redis (Free — 25MB, no persistence) ---
+  - type: keyvalue
+    name: halwall-redis
+    plan: free
+    region: oregon
+    maxmemoryPolicy: allkeys-lru
+    ipAllowList: []  # Only internal/private network access
+
+databases:
+  # --- PostgreSQL (Free — 1GB, 30-day expiry) ---
+  - name: halwall-db
+    plan: free
+    region: oregon
+    databaseName: halwall
+    user: halwall_user
+    postgresMajorVersion: "15"
