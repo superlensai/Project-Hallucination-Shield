@@ -1,4 +1,4 @@
-# HalWall — Trusted Package Database
+# HalWall — Trusted Package Database Management
 
 HalWall is a supply-chain security service that crawls package registries, computes trust scores, detects hallucinated package names, and exposes a fast lookup API for developer tools and CI pipelines.
 
